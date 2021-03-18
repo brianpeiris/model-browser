@@ -17,4 +17,6 @@ $ npx model-browser
 
 See `model-browser --help` for more details
 
+---
+
 ![A screenshot of model-browser](screenshot.png)
