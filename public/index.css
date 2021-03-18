@@ -1,0 +1,68 @@
+body {
+  margin: 0;
+  font-family: sans-serif;
+  font-size: 10pt;
+  overflow: hidden;
+}
+
+body, input {
+  background: #22222b;
+  color: #eee;
+}
+
+h2 {
+  margin: 1em;
+  text-align: center;
+}
+
+input {
+  border: 1px solid #aaa;
+}
+
+#root {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100vh;
+}
+
+.loading,
+input {
+  display: flex;
+  margin: 5px;
+  margin-bottom: 15px;
+  text-align: center;
+  max-height: 2em;
+  min-height: 2em;
+  align-items: center;
+}
+
+.model {
+  position: absolute;
+}
+
+.thumbnails {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  overflow-y: auto;
+  padding: 0 20px;
+}
+
+.thumbnail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin: 10px;
+}
+
+.thumbnail img {
+  margin-bottom: 5px;
+}
+
+.thumbnail > span {
+  max-width: 200px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+}
