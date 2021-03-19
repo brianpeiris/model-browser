@@ -7,7 +7,11 @@ body {
 
 body, input {
   background: #22222b;
+}
+
+body, input, a{
   color: #eee;
+  text-decoration: none;
 }
 
 h2 {
@@ -60,9 +64,13 @@ input {
   margin-bottom: 5px;
 }
 
-.thumbnail > span {
+.thumbnail > a {
   max-width: 200px;
   text-overflow: ellipsis;
   white-space: nowrap;
   overflow: hidden;
+}
+
+.thumbnail > a:hover {
+  text-decoration: underline;
 }

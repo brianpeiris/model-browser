@@ -1,6 +1,7 @@
 import * as THREE from "./node_modules/three/build/three.module.js";
 import { GLTFLoader } from "./node_modules/three/examples/jsm/loaders/GLTFLoader.js";
 import { OrbitControls } from "./node_modules/three/examples/jsm/controls/OrbitControls.js";
+import { Sky } from "./node_modules/three/examples/jsm/objects/Sky.js";
 import "./node_modules/react/umd/react.production.min.js";
 import "./node_modules/react-dom/umd/react-dom.production.min.js";
 
@@ -12,28 +13,65 @@ const { useState, useEffect, useRef, useCallback } = React;
 const query = new URLSearchParams(location.search);
 const flip = query.get("flip") !== null;
 
+function generateEnvironmentMap(sky, renderer) {
+  const skyScene = new THREE.Scene();
+  skyScene.add(sky);
+
+  const pmremGenerator = new THREE.PMREMGenerator(renderer);
+  const renderTarget = pmremGenerator.fromScene(skyScene);
+  pmremGenerator.dispose();
+
+  skyScene.remove(sky);
+
+  return renderTarget.texture;
+}
+
+function createSky(lightPosition) {
+  const sky = new Sky();
+  sky.scale.setScalar(450000);
+
+  const uniforms = sky.material.uniforms;
+  uniforms["turbidity"].value = 0.4;
+  uniforms["rayleigh"].value = 4;
+  uniforms["mieCoefficient"].value = 0.05;
+  uniforms["mieDirectionalG"].value = 0.95;
+  uniforms["sunPosition"].value.copy(lightPosition);
+
+  return sky;
+}
+
 function setupThree(backgroundColor) {
   const scene = new THREE.Scene();
 
-  scene.add(new THREE.AmbientLight(0x666666));
+  scene.add(new THREE.AmbientLight(0x333333));
 
-  const light = new THREE.DirectionalLight();
+  const light = new THREE.DirectionalLight(0x888888);
   scene.add(light);
 
   const model = new THREE.Group();
   scene.add(model);
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.outputEncoding = THREE.sRGBEncoding;
   renderer.setClearColor(backgroundColor);
 
+  if (flip) {
+    light.position.set(1, 2, -3);
+  } else {
+    light.position.set(1, 2, 3);
+  }
+
+  const sky = createSky(light.position);
+  const envMap = generateEnvironmentMap(sky, renderer);
+
   const camera = new THREE.OrthographicCamera();
+  camera.near = 0;
+  camera.far = 100;
 
   if (flip) {
     camera.position.set(1, 1, -1);
-    light.position.set(1, 2, -3);
   } else {
     camera.position.set(1, 1, 1);
-    light.position.set(1, 2, 3);
   }
 
   camera.lookAt(new THREE.Vector3());
@@ -45,17 +83,28 @@ function setupThree(backgroundColor) {
 
   const loader = new GLTFLoader();
 
-  return { renderer, scene, camera, model, loader };
+  return { renderer, scene, envMap, camera, model, loader };
 }
 
-function addGltf(gltfScene, group, camera) {
+function addGltf(gltfScene, group, envMap, camera) {
   gltfScene.traverse((obj) => {
     if (!obj.material) return;
-    obj.material.metalness = 0;
+    obj.material.envMap = envMap;
+    obj.material.envMapIntensity = 0.3;
   });
 
   const box = new THREE.Box3();
   box.setFromObject(gltfScene);
+  let size = new THREE.Vector3();
+  box.getSize(size);
+  let maxSize = Math.max(size.x, size.y, size.z);
+
+  if (maxSize > 2) {
+    gltfScene.scale.setScalar(1 / maxSize);
+    box.setFromObject(gltfScene);
+    box.getSize(size);
+    maxSize = Math.max(size.x, size.y, size.z);
+  }
 
   const center = new THREE.Vector3();
   box.getCenter(center);
@@ -63,10 +112,6 @@ function addGltf(gltfScene, group, camera) {
 
   group.clear();
   group.add(gltfScene);
-
-  const size = new THREE.Vector3();
-  box.getSize(size);
-  const maxSize = Math.max(size.x, size.y, size.z);
 
   camera.top = maxSize;
   camera.right = maxSize;
@@ -76,18 +121,25 @@ function addGltf(gltfScene, group, camera) {
   camera.updateProjectionMatrix();
 }
 
+const recentCache = [];
 function loadFile(loader, file) {
+  const cached = recentCache.find(entry => entry.file === file);
+  if (cached) return Promise.resolve(cached.gltf);
   return new Promise((resolve, reject) =>
-    loader.load(`/files/${file}`, resolve, null, reject)
+    loader.load(`/files/${file}`, gltf => {
+      recentCache.push({file, gltf});
+      if (recentCache.length > 10) recentCache.shift();
+      resolve(gltf);
+    }, null, reject)
   );
 }
 
 const renderThumbnail = (() => {
-  const { renderer, scene, camera, model, loader } = setupThree("#444");
+  const { renderer, scene, envMap, camera, model, loader } = setupThree("#444");
 
   async function renderThumbnail(file) {
     const gltf = await loadFile(loader, file);
-    addGltf(gltf.scene, model, camera);
+    addGltf(gltf.scene, model, envMap, camera);
 
     renderer.render(scene, camera);
     return renderer.domElement.toDataURL();
@@ -99,14 +151,31 @@ const renderThumbnail = (() => {
 function getName(name) {
   if (!name) return;
   if (name.includes("/")) {
-    return name.substring(name.lastIndexOf("/") + 1)
+    return name.substring(name.lastIndexOf("/") + 1);
   } else {
-    return name.substring(name.lastIndexOf("\\") + 1)
+    return name.substring(name.lastIndexOf("\\") + 1);
   }
 }
 
 function Thumbnail({ file, onPointerMove, onPointerDown }) {
   const name = file.file;
+
+  /*
+  const [dataURL, setDataURL] = useState();
+
+  useEffect(() => {
+    fetch(`/files/${file.file}`)
+      .then((r) => r.blob())
+      .then((blob) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          setDataURL(reader.result);
+        };
+        reader.readAsDataURL(blob);
+      });
+  }, [file]);
+  */
+
   return el(
     "div",
     { className: "thumbnail" },
@@ -116,7 +185,7 @@ function Thumbnail({ file, onPointerMove, onPointerDown }) {
       onPointerMove,
       onPointerDown,
     }),
-    el("span", { title: name }, getName(name))
+    el("a", { title: name, href: `/files/${file.file}` }, getName(name))
   );
 }
 
@@ -125,16 +194,19 @@ function Model({ elem, file, onMouseLeave }) {
   const modelGroup = useRef();
   const gltfLoader = useRef();
   const cameraObj = useRef();
+  const envMapRef = useRef();
   const controls = useRef();
   const render = useRef();
+  const fileUrl = useRef();
   const [style, setStyle] = useState({ top: 0, left: 0 });
 
   useEffect(async () => {
-    const { renderer, scene, camera, model, loader } = setupThree("#555");
+    const { renderer, scene, envMap, camera, model, loader } = setupThree("#555");
 
     modelGroup.current = model;
     gltfLoader.current = loader;
     cameraObj.current = camera;
+    envMapRef.current = envMap;
 
     modelDiv.current.append(renderer.domElement);
 
@@ -152,9 +224,15 @@ function Model({ elem, file, onMouseLeave }) {
 
     if (!file) return;
 
+    fileUrl.current = file.file;
+
     controls.current.reset();
+
     const gltf = await loadFile(gltfLoader.current, file.file);
-    addGltf(gltf.scene, modelGroup.current, cameraObj.current);
+
+    if(file.file !== fileUrl.current) return;
+
+    addGltf(gltf.scene, modelGroup.current, envMapRef.current, cameraObj.current);
 
     render.current();
 
@@ -197,7 +275,7 @@ function App() {
       .then(async ({ basePath, files }) => {
         setBasePath(basePath);
         const results = [];
-        files = files.slice(0);
+        //files = files.filter((f) => f.includes("")).slice(0);
         setProgress({ num: 0, total: files.length });
         for (let i = 0; i < files.length; i++) {
           const file = files[i];
@@ -213,6 +291,11 @@ function App() {
       });
   }, []);
 
+  const clearPreviewModel = useCallback(() => {
+    setPreviewThumbnail(null);
+    setPreviewFile(null);
+  }, [setPreviewThumbnail, setPreviewFile]);
+
   const previewModel = useCallback(
     (thumbnail, file) => {
       setPreviewThumbnail(thumbnail);
@@ -225,7 +308,9 @@ function App() {
   const noFiles = progress && progress.total === 0;
 
   const filteredFiles = files.filter(
-    (file) => !filter || getName(file.file)?.toLowerCase().includes(filter.toLowerCase())
+    (file) =>
+      !filter ||
+      getName(file.file)?.toLowerCase().includes(filter.toLowerCase())
   );
 
   const formattedBasePath = basePath
@@ -243,7 +328,7 @@ function App() {
       placeholder: "filter",
       value: filter,
       onChange: (e) => {
-        previewModel(null, null);
+        clearPreviewModel();
         setFilter(e.target.value);
       },
     }),
@@ -260,8 +345,11 @@ function App() {
       "div",
       {
         className: "thumbnails",
-        onPointerDown: (e) => e.currentTarget === e.target && previewModel(null, null),
-        onScroll: () => window.dispatchEvent(new CustomEvent("thumbnails-scroll")),
+        onPointerDown: (e) =>
+          e.currentTarget === e.target && clearPreviewModel(),
+        onContextMenu: (e) => e.preventDefault(),
+        onScroll: () =>
+          window.dispatchEvent(new CustomEvent("thumbnails-scroll")),
       },
       filteredFiles.map((file) =>
         el(Thumbnail, {
@@ -276,7 +364,7 @@ function App() {
     el(Model, {
       elem: previewThumbnail,
       file: previewFile,
-      onMouseLeave: (e) => e.buttons === 0 && previewModel(null, null),
+      onMouseLeave: (e) => e.buttons === 0 && clearPreviewModel(),
     })
   );
 }
