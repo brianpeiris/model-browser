@@ -19,4 +19,5 @@ See `model-browser --help` for more details
 
 ---
 
-![A screenshot of model-browser](screenshot.png)
+![A screenshot of model-browser](https://user-images.githubusercontent.com/79419/111801878-9add7080-888a-11eb-928e-02a7b53cdd0c.png)
+
