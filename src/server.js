@@ -9,42 +9,45 @@ const recursive = require("recursive-readdir");
 const yargs = require("yargs/yargs");
 const { hideBin } = require("yargs/helpers");
 
-const { argv } = yargs(hideBin(process.argv)).command(
-  "$0 [path]",
-  "model-browser",
-  (yargs) => {
-    yargs.positional("path", {
-      describe: "Path containing models you want to browse",
-      type: "string",
-      default: ".",
+const options = require("./options");
+
+const { argv } = yargs(hideBin(process.argv))
+  .scriptName("model-browser")
+  .wrap(require("yargs").terminalWidth())
+  .command("$0 [files..]", "model-browser", (yargs) => {
+    yargs.positional("files", {
+      describe:
+        "Path to a directory containing models you want to browse, or a list of file paths. Files can also be piped in.",
+      type: "array",
     });
-    yargs.options({
-      port: {
-        describe: 'Port to run the model-browser server on.',
-        type: 'number',
-        defaultDescription: 'first available port'
-      },
-      flip: {
-        describe: 'Whether models should be flipped',
-        type: 'boolean',
-        default: false
-      },
-      recursive: {
-        describe: 'Whether files should be listed recursively',
-        type: 'boolean',
-        default: false
-      },
-      open: {
-        describe: 'Whether model-browser should automatically open your browser',
-        type: 'boolean',
-        default: true
-      },
-    });
-  }
+    yargs.options(options);
+  });
+
+function cleanPath(filePath) {
+  // The replaces here get rid of quotes that some terminals add.
+  return filePath.trim().replace(/^'/, "").replace(/'$/, "").replace(/"$/, "");
+}
+
+const state = {
+  stdin: "",
+  filesIsList: null,
+  filesList: [],
+  basePath: null,
+  timeoutId: null,
+};
+
+try {
+  state.stdin = fs.readFileSync(process.stdin.fd, "utf-8");
+} catch (e) {
+  // no content in stdin.
+}
+state.filesIsList = cleanPath(state.stdin || argv.files[0] || "").endsWith(
+  ".glb"
 );
 
-const basePath = path.resolve(argv.path.replace(/^'/, '').replace(/'$/, '').replace(/"$/, ''));
-
+state.basePath = state.filesIsList
+  ? null
+  : path.resolve(cleanPath(argv.files[0]));
 const app = express();
 
 if (process.env.NODE_ENV === "development") {
@@ -63,32 +66,107 @@ app.use(
   express.static(path.resolve(__dirname, "..", "node_modules"))
 );
 
-app.get("/files", async (req, res) => {
-  let files;
-  if (argv.recursive) {
-    files = (await recursive(basePath)).map(file => file.replace(basePath + path.sep, ""));
-  } else {
-    files = fs.readdirSync(basePath);
+function fullUrl(origin) {
+  if (!origin.startsWith("http")) return `https://${origin}`;
+  else return origin;
+}
+
+function maybeAddCors(req, res) {
+  const requestOrigin = req.get("origin");
+  if (!requestOrigin) return;
+  if (!argv.allowCors) return;
+
+  const allowedOrigins = argv.allowCors
+    .split(",")
+    .map((s) => s.trim())
+    .map(fullUrl);
+
+  if (argv.allowCors === "*" || allowedOrigins.includes(requestOrigin)) {
+    res.set("access-control-allow-origin", requestOrigin);
+    console.log(`Allowing request to ${req.path} from ${requestOrigin}`);
   }
-  res.send({
-    basePath,
-    files: files.filter((file) => file.endsWith(".glb")),
-  });
+}
+
+function restartTimeout() {
+  if (state.timeoutId) clearTimeout(state.timeoutId);
+
+  if (argv.timeoutMinutes === 0) return;
+
+  state.timeoutId = setTimeout(() => {
+    console.log(
+      `No requests received in ${argv.timeoutMinutes} minutes. Killing server.`
+    );
+    process.exit(0);
+  }, argv.timeoutMinutes * 60 * 1000);
+}
+
+app.get("/files", async (req, res) => {
+  res.send({ basePath: state.basePath, files: state.filesList });
 });
 
 app.get(/\/files\/.*/, (req, res) => {
-  res.sendFile(path.join(basePath, decodeURIComponent(req.path.substring(7))));
+  maybeAddCors(req, res);
+
+  const filePath = decodeURIComponent(req.path.substring(7));
+
+  if (!state.filesList.includes(filePath)) {
+    res.sendStatus(404);
+    return;
+  }
+  if (state.filesIsList) {
+    res.sendFile(filePath);
+  } else {
+    res.sendFile(path.join(state.basePath, filePath));
+  }
+});
+
+app.get("/heartbeat", (req, res) => {
+  if (req.get("origin")) {
+    res.sendStatus(404);
+    return;
+  }
+
+  restartTimeout();
+
+  res.send("ok");
 });
 
 (async () => {
+  if (state.filesIsList) {
+    state.filesList = state.stdin ? state.stdin.split(/[\r\n]/) : argv.files;
+    state.filesList = state.filesList
+      .flatMap((s) => s.split(/[\r\n]/))
+      .map((s) => s.trim())
+      .filter((s) => s.length)
+      .map((s) => path.resolve(s));
+  } else {
+    if (argv.recursive) {
+      state.filesList = (await recursive(state.basePath)).map((file) =>
+        file.replace(state.basePath + path.sep, "")
+      );
+    } else {
+      state.filesList = fs.readdirSync(state.basePath);
+    }
+  }
+  state.filesList = state.filesList.filter((file) => file.endsWith(".glb"));
+
   let port = argv.port || (await portfinder.getPortPromise());
   app.listen(port, () => {
-    const url = `http://localhost:${port}${argv.flip ? "?flip" : ""}`;
+    const params = [];
+    if (argv.flip) params.push("flip");
+    if (argv.linear) params.push("linear");
+
+    const url = `http://localhost:${port}${
+      params.length ? "?" + params.join("&") : ""
+    }`;
+
     if (argv.open === false) {
       console.log(`Model browser running at ${url}.`);
     } else {
       console.log(`Opening model browser at ${url}.`);
       open(url);
     }
+
+    restartTimeout();
   });
 })();

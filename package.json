@@ -7,7 +7,7 @@
   "repository": "github:brianpeiris/model-browser",
   "bin": "src/server.js",
   "scripts": {
-    "dev": "cross-env NODE_ENV=development nodemon -w src/server.js src/server.js"
+    "dev": "cross-env NODE_ENV=development nodemon -w 'src/*.js' src/server.js"
   },
   "dependencies": {
     "express": "^4.17.1",

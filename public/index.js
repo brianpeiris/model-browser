@@ -1,7 +1,7 @@
 import * as THREE from "./node_modules/three/build/three.module.js";
 import { GLTFLoader } from "./node_modules/three/examples/jsm/loaders/GLTFLoader.js";
 import { OrbitControls } from "./node_modules/three/examples/jsm/controls/OrbitControls.js";
-import { Sky } from "./node_modules/three/examples/jsm/objects/Sky.js";
+import { RGBELoader } from "./node_modules/three/examples/jsm/loaders/RGBELoader.js";
 import "./node_modules/react/umd/react.production.min.js";
 import "./node_modules/react-dom/umd/react-dom.production.min.js";
 
@@ -12,67 +12,45 @@ const { useState, useEffect, useRef, useCallback } = React;
 
 const query = new URLSearchParams(location.search);
 const flip = query.get("flip") !== null;
+const linear = query.get("linear") !== null;
 
-function generateEnvironmentMap(sky, renderer) {
-  const skyScene = new THREE.Scene();
-  skyScene.add(sky);
-
-  const pmremGenerator = new THREE.PMREMGenerator(renderer);
-  const renderTarget = pmremGenerator.fromScene(skyScene);
-  pmremGenerator.dispose();
-
-  skyScene.remove(sky);
-
-  return renderTarget.texture;
-}
-
-function createSky(lightPosition) {
-  const sky = new Sky();
-  sky.scale.setScalar(450000);
-
-  const uniforms = sky.material.uniforms;
-  uniforms["turbidity"].value = 0.4;
-  uniforms["rayleigh"].value = 4;
-  uniforms["mieCoefficient"].value = 0.05;
-  uniforms["mieDirectionalG"].value = 0.95;
-  uniforms["sunPosition"].value.copy(lightPosition);
-
-  return sky;
-}
-
-function setupThree(backgroundColor) {
+async function setupThree(backgroundColor) {
   const scene = new THREE.Scene();
 
-  scene.add(new THREE.AmbientLight(0x333333));
-
-  const light = new THREE.DirectionalLight(0x888888);
-  scene.add(light);
-
   const model = new THREE.Group();
+
+  if (flip) {
+    model.rotateY(-Math.PI / 2);
+  }
   scene.add(model);
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.outputEncoding = THREE.sRGBEncoding;
+  if (!linear) renderer.outputEncoding = THREE.sRGBEncoding;
   renderer.setClearColor(backgroundColor);
 
-  if (flip) {
-    light.position.set(1, 2, -3);
-  } else {
-    light.position.set(1, 2, 3);
-  }
+  const envMap = await new Promise((resolve, reject) => {
+    const pmremGenerator = new THREE.PMREMGenerator(renderer);
+    new RGBELoader().setDataType(THREE.UnsignedByteType).load(
+      "env.hdr",
+      (texture) => {
+        try {
+          const renderTarget = pmremGenerator.fromEquirectangular(texture);
+          resolve(renderTarget.texture);
+        } catch (e) {
+          reject(e);
+        }
+      },
+      null,
+      reject
+    );
+  });
 
-  const sky = createSky(light.position);
-  const envMap = generateEnvironmentMap(sky, renderer);
+  scene.environment = envMap;
 
   const camera = new THREE.OrthographicCamera();
   camera.near = 0;
   camera.far = 100;
-
-  if (flip) {
-    camera.position.set(1, 1, -1);
-  } else {
-    camera.position.set(1, 1, 1);
-  }
+  camera.position.set(1, 1, 1);
 
   camera.lookAt(new THREE.Vector3());
 
@@ -83,16 +61,10 @@ function setupThree(backgroundColor) {
 
   const loader = new GLTFLoader();
 
-  return { renderer, scene, envMap, camera, model, loader };
+  return { renderer, scene, camera, model, loader };
 }
 
-function addGltf(gltfScene, group, envMap, camera) {
-  gltfScene.traverse((obj) => {
-    if (!obj.material) return;
-    obj.material.envMap = envMap;
-    obj.material.envMapIntensity = 0.3;
-  });
-
+function addGltf(gltfScene, group, camera) {
   const box = new THREE.Box3();
   box.setFromObject(gltfScene);
   let size = new THREE.Vector3();
@@ -123,26 +95,41 @@ function addGltf(gltfScene, group, envMap, camera) {
 
 const recentCache = [];
 function loadFile(loader, file) {
-  const cached = recentCache.find(entry => entry.file === file);
+  const cached = recentCache.find((entry) => entry.file === file);
   if (cached) return Promise.resolve(cached.gltf);
   return new Promise((resolve, reject) =>
-    loader.load(`/files/${file}`, gltf => {
-      recentCache.push({file, gltf});
-      if (recentCache.length > 10) recentCache.shift();
-      resolve(gltf);
-    }, null, reject)
+    loader.load(
+      `/files/${file}`,
+      (gltf) => {
+        recentCache.push({ file, gltf });
+        if (recentCache.length > 10) recentCache.shift();
+        resolve(gltf);
+      },
+      null,
+      reject
+    )
   );
 }
 
 const renderThumbnail = (() => {
-  const { renderer, scene, envMap, camera, model, loader } = setupThree("#444");
+  const setupPromise = setupThree("#444");
 
   async function renderThumbnail(file) {
+    const { renderer, scene, camera, model, loader } = await setupPromise;
+
     const gltf = await loadFile(loader, file);
-    addGltf(gltf.scene, model, envMap, camera);
+    addGltf(gltf.scene, model, camera);
 
     renderer.render(scene, camera);
-    return renderer.domElement.toDataURL();
+
+    const blob = await new Promise((resolve, reject) => {
+      try {
+        renderer.domElement.toBlob(resolve);
+      } catch (e) {
+        reject(e);
+      }
+    });
+    return URL.createObjectURL(blob);
   }
 
   return renderThumbnail;
@@ -159,22 +146,6 @@ function getName(name) {
 
 function Thumbnail({ file, onPointerMove, onPointerDown }) {
   const name = file.file;
-
-  /*
-  const [dataURL, setDataURL] = useState();
-
-  useEffect(() => {
-    fetch(`/files/${file.file}`)
-      .then((r) => r.blob())
-      .then((blob) => {
-        const reader = new FileReader();
-        reader.onload = () => {
-          setDataURL(reader.result);
-        };
-        reader.readAsDataURL(blob);
-      });
-  }, [file]);
-  */
 
   return el(
     "div",
@@ -194,19 +165,17 @@ function Model({ elem, file, onMouseLeave }) {
   const modelGroup = useRef();
   const gltfLoader = useRef();
   const cameraObj = useRef();
-  const envMapRef = useRef();
   const controls = useRef();
   const render = useRef();
   const fileUrl = useRef();
   const [style, setStyle] = useState({ top: 0, left: 0 });
 
   useEffect(async () => {
-    const { renderer, scene, envMap, camera, model, loader } = setupThree("#555");
+    const { renderer, scene, camera, model, loader } = await setupThree("#555");
 
     modelGroup.current = model;
     gltfLoader.current = loader;
     cameraObj.current = camera;
-    envMapRef.current = envMap;
 
     modelDiv.current.append(renderer.domElement);
 
@@ -230,9 +199,9 @@ function Model({ elem, file, onMouseLeave }) {
 
     const gltf = await loadFile(gltfLoader.current, file.file);
 
-    if(file.file !== fileUrl.current) return;
+    if (file.file !== fileUrl.current) return;
 
-    addGltf(gltf.scene, modelGroup.current, envMapRef.current, cameraObj.current);
+    addGltf(gltf.scene, modelGroup.current, cameraObj.current);
 
     render.current();
 
@@ -274,9 +243,12 @@ function App() {
       .then((r) => r.json())
       .then(async ({ basePath, files }) => {
         setBasePath(basePath);
+
         const results = [];
         //files = files.filter((f) => f.includes("")).slice(0);
+
         setProgress({ num: 0, total: files.length });
+
         for (let i = 0; i < files.length; i++) {
           const file = files[i];
 
@@ -289,6 +261,10 @@ function App() {
           window.dispatchEvent(new CustomEvent("loaded-file"));
         }
       });
+
+    setInterval(() => {
+      fetch("/heartbeat");
+    }, 30 * 1000);
   }, []);
 
   const clearPreviewModel = useCallback(() => {
@@ -313,16 +289,17 @@ function App() {
       getName(file.file)?.toLowerCase().includes(filter.toLowerCase())
   );
 
+  // There are zero-width spaces before and after the replaced slashes here.
   const formattedBasePath = basePath
     ?.trim()
-    .replace(/^[/\\]/, "")
-    .replace(/[/\\]/g, " > ");
+    .replace(/[\\]/g, "​\\​")
+    .replace(/[/]/g, "​/​");
 
   return el(
     React.Fragment,
     {},
     el("h1", {}, "model-browser"),
-    el("h2", {}, formattedBasePath),
+    basePath && el("h2", {}, formattedBasePath),
     el("input", {
       type: "search",
       placeholder: "filter",
@@ -347,7 +324,7 @@ function App() {
         className: "thumbnails",
         onPointerDown: (e) =>
           e.currentTarget === e.target && clearPreviewModel(),
-        onContextMenu: (e) => e.preventDefault(),
+        onContextMenu: (e) => e.target.nodeName !== "A" && e.preventDefault(),
         onScroll: () =>
           window.dispatchEvent(new CustomEvent("thumbnails-scroll")),
       },

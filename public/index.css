@@ -14,8 +14,13 @@ body, input, a{
   text-decoration: none;
 }
 
+h1 {
+  font-size: 18pt;
+}
+
 h2 {
-  margin: 1em;
+  margin: 0.5em;
+  margin-top: 0;
   text-align: center;
 }
 
@@ -32,9 +37,9 @@ input {
 
 .loading,
 input {
+  font-size: 12pt;
   display: flex;
   margin: 5px;
-  margin-bottom: 15px;
   text-align: center;
   max-height: 2em;
   min-height: 2em;
