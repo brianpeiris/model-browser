@@ -1,6 +1,6 @@
 {
   "name": "model-browser",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "A tool for browsing local 3D models via a web browser interface. Currently only supports GLB files.",
   "license": "MIT",
   "keywords": ["tool", "gltf", "glb", "3d"],
