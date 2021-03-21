@@ -15,6 +15,8 @@ OR
 $ npx model-browser
 ```
 
+---
+
 ```
 model-browser [files..]
 
@@ -48,5 +50,6 @@ Options:
 
 ---
 
-![A screenshot of model-browser](https://user-images.githubusercontent.com/79419/111801878-9add7080-888a-11eb-928e-02a7b53cdd0c.png)
+![A screenshot of model-browser](https://user-images.githubusercontent.com/79419/111898136-84eebd80-89fa-11eb-945b-0ec4e249e9c5.png)
+
 
