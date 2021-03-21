@@ -41,13 +41,13 @@ try {
 } catch (e) {
   // no content in stdin.
 }
-state.filesIsList = cleanPath(state.stdin || argv.files[0] || "").endsWith(
+state.filesIsList = cleanPath(state.stdin || (argv.files && argv.files[0]) || "").endsWith(
   ".glb"
 );
 
 state.basePath = state.filesIsList
   ? null
-  : path.resolve(cleanPath(argv.files[0]));
+  : path.resolve(cleanPath(argv.files && argv.files[0] || "."));
 const app = express();
 
 if (process.env.NODE_ENV === "development") {

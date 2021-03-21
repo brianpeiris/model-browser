@@ -99,7 +99,7 @@ function loadFile(loader, file) {
   if (cached) return Promise.resolve(cached.gltf);
   return new Promise((resolve, reject) =>
     loader.load(
-      `/files/${file}`,
+      `/files/${encodeURIComponent(file)}`,
       (gltf) => {
         recentCache.push({ file, gltf });
         if (recentCache.length > 10) recentCache.shift();
@@ -156,7 +156,7 @@ function Thumbnail({ file, onPointerMove, onPointerDown }) {
       onPointerMove,
       onPointerDown,
     }),
-    el("a", { title: name, href: `/files/${file.file}` }, getName(name))
+    el("a", { title: name, href: `/files/${encodeURIComponent(file.file)}` }, getName(name))
   );
 }
 
