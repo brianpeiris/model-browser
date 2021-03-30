@@ -237,6 +237,8 @@ function App() {
   const [progress, setProgress] = useState();
   const [previewThumbnail, setPreviewThumbnail] = useState();
   const [previewFile, setPreviewFile] = useState();
+  const [failures, setFailures] = useState([]);
+  const [failuresDismissed, setFailuresDismissed] = useState(false);
 
   useEffect(() => {
     fetch(`/files`)
@@ -252,13 +254,16 @@ function App() {
         for (let i = 0; i < files.length; i++) {
           const file = files[i];
 
-          const thumbnail = await renderThumbnail(file);
-          results.push({ file, thumbnail });
-          setFiles(results.slice(0));
+          try {
+            const thumbnail = await renderThumbnail(file);
+            results.push({ file, thumbnail });
+            setFiles(results.slice(0));
+            window.dispatchEvent(new CustomEvent("loaded-file"));
+          } catch(e) {
+            setFailures(failures => failures.concat([file]));
+          }
 
           setProgress({ num: i + 1, total: files.length });
-
-          window.dispatchEvent(new CustomEvent("loaded-file"));
         }
       });
 
@@ -337,6 +342,12 @@ function App() {
           onPointerDown: (e) => previewModel(e.currentTarget, file),
         })
       )
+    ),
+    !!(failures.length) && !failuresDismissed && el(
+      "div",
+      { className: "failures" },
+      `${failures.length} models failed to load`,
+      el("button", { onClick: () => setFailuresDismissed(true) }, "X")
     ),
     el(Model, {
       elem: previewThumbnail,
